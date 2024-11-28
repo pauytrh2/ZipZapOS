@@ -2,17 +2,28 @@ import zipfile
 import os
 import json
 
+if os.name == "nt":
+    os.system("cls")
+else:
+    os.system("clear")
+
 class ZipZapOS:
     def __init__(self, root_zip="root.zip"):
         self.root_zip = root_zip
-        self.current_path = "/data/"
+        self.current_path = "/"
         self.logged_in_user = None
         self.command_history = []
 
+        # Create root.zip and initialize file structure if not exists
         if not os.path.exists(self.root_zip):
             with zipfile.ZipFile(self.root_zip, 'w') as zf:
-                zf.writestr("/data/", "")
-                zf.writestr("/data/users.json", json.dumps({"admin": "password"}))
+                # Create the root directory and subdirectories (like /bin, /home, /etc, etc)
+                zf.writestr("/", "")  # Root directory
+                zf.writestr("/bin/", "")  # Bin directory (for system commands)
+                zf.writestr("/home/", "")  # User directories will be here
+                zf.writestr("/etc/", "")  # System configurations
+                zf.writestr("/data/", "")  # General system data
+                zf.writestr("/data/users.json", json.dumps({}))  # For storing users
 
     def load_users(self):
         with zipfile.ZipFile(self.root_zip, 'r') as zf:
@@ -33,10 +44,16 @@ class ZipZapOS:
 
     def change_directory(self, path):
         with zipfile.ZipFile(self.root_zip, 'r') as zf:
+            # Handling the root and changing directories correctly
             if path == "/":
-                self.current_path = "/data/"
-            elif path.endswith("/") and (self.current_path + path) in zf.namelist():
-                self.current_path = (self.current_path + path).replace("//", "/")
+                self.current_path = "/"
+            elif path.startswith("/home/") and path != self.current_path:
+                if any(f.startswith(path) for f in zf.namelist()):
+                    self.current_path = path
+                else:
+                    print(f"No such directory: {path}")
+            elif path in zf.namelist() or path == "/":
+                self.current_path = path
             else:
                 print(f"No such directory: {path}")
 
@@ -63,11 +80,6 @@ class ZipZapOS:
                 print(zf.read(file_path).decode() or "(empty)")
             else:
                 print(f"No such file: {filename}")
-
-    def write_file(self, filename, content):
-        with zipfile.ZipFile(self.root_zip, 'a') as zf:
-            file_path = self.current_path + filename
-            zf.writestr(file_path, content)
 
     def remove(self, name):
         with zipfile.ZipFile(self.root_zip, 'r') as zf:
@@ -121,14 +133,12 @@ class ZipZapOS:
         users = self.load_users()
         if username in users and users[username] == password:
             self.logged_in_user = username
+            self.current_path = f"/home/{username}/"
             print(f"Logged in as {username}")
         else:
             print("Invalid username or password")
 
     def add_user(self, username, password):
-        if self.logged_in_user != "admin":
-            print("Only admin can add users!")
-            return
         users = self.load_users()
         if username in users:
             print(f"User {username} already exists!")
@@ -139,6 +149,7 @@ class ZipZapOS:
 
     def logout(self):
         self.logged_in_user = None
+        self.current_path = "/"
         print("Logged out successfully.")
 
     def help(self):
@@ -149,7 +160,7 @@ Available Commands:
   mkdir <dir>       - Create a new directory
   mk <file>         - Create a new file
   cat <file>        - Display the content of a file
-  write <file> <content> - Write content to a file
+  edit <file>       - Open a text editor to edit a file (like nano)
   rm <file/dir>     - Remove a file or directory
   rename <old> <new>- Rename a file or directory
   cp <src> <dest>   - Copy a file or directory
@@ -157,7 +168,7 @@ Available Commands:
   history           - Show command history
   help              - Display this help message
   login <user> <pass> - Log in to the system
-  adduser <user> <pass> - Add a new user (admin only)
+  adduser <user> <pass> - Add a new user
   logout            - Log out of the current user session
   exit              - Exit the system
 """
@@ -165,7 +176,20 @@ Available Commands:
 
     def run(self):
         print("Welcome to ZipZapOS!")
-        print("Default login: admin/password")
+
+        # Prompt to create the first user if no users exist
+        users = self.load_users()
+        if not users:
+            username = input("No users found. Please create a username: ")
+            password = input("Create a password for your user: ")
+            users[username] = password
+            self.save_users(users)
+            self.logged_in_user = username
+            # Create the user's directory under /home/
+            with zipfile.ZipFile(self.root_zip, 'a') as zf:
+                zf.writestr(f"/home/{username}/", "")
+            print(f"User {username} created and logged in automatically.")
+
         while True:
             if not self.logged_in_user:
                 username = input("Username: ")
@@ -180,39 +204,43 @@ Available Commands:
             match cmd[0]:
                 case "ls":
                     self.list_contents()
-                case "cd" if len(cmd) > 1:
-                    self.change_directory(cmd[1])
-                case "mkdir" if len(cmd) > 1:
-                    self.make_directory(cmd[1])
-                case "mk" if len(cmd) > 1:
-                    self.make_file(cmd[1])
-                case "cat" if len(cmd) > 1:
-                    self.read_file(cmd[1])
-                case "write" if len(cmd) > 2:
-                    self.write_file(cmd[1], " ".join(cmd[2:]))
-                case "rm" if len(cmd) > 1:
-                    self.remove(cmd[1])
-                case "rename" if len(cmd) > 2:
-                    self.rename(cmd[1], cmd[2])
-                case "cp" if len(cmd) > 2:
-                    self.copy(cmd[1], cmd[2])
+                case "cd":
+                    if len(cmd) > 1:
+                        self.change_directory(cmd[1])
+                case "mkdir":
+                    if len(cmd) > 1:
+                        self.make_directory(cmd[1])
+                case "mk":
+                    if len(cmd) > 1:
+                        self.make_file(cmd[1])
+                case "cat":
+                    if len(cmd) > 1:
+                        self.read_file(cmd[1])
+                case "edit":
+                    if len(cmd) > 1:
+                        self.edit_file(cmd[1])
+                case "rm":
+                    if len(cmd) > 1:
+                        self.remove(cmd[1])
+                case "rename":
+                    if len(cmd) > 2:
+                        self.rename(cmd[1], cmd[2])
+                case "cp":
+                    if len(cmd) > 2:
+                        self.copy(cmd[1], cmd[2])
                 case "sysinfo":
                     self.show_system_info()
                 case "history":
                     self.show_history()
                 case "help":
                     self.help()
-                case "exit":
-                    print("Goodbye!")
-                    break
-                case "login" if len(cmd) > 2:
-                    self.login(cmd[1], cmd[2])
-                case "adduser" if len(cmd) > 2:
-                    self.add_user(cmd[1], cmd[2])
                 case "logout":
                     self.logout()
+                case "exit":
+                    break
                 case _:
-                    print("Unknown command!")
+                    print("Unknown command. Type 'help' for a list of commands.")
 
 if __name__ == "__main__":
-    ZipZapOS().run()
+    os = ZipZapOS()
+    os.run()
